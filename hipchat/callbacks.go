@@ -19,17 +19,24 @@ type InstallRecord struct {
 	RoomID          uint64 `json:"roomId"`
 }
 
-// CallbackHandler stores state shared by callback handler functions
-type CallbackHandler struct {
+// callbackHandler stores state shared by callback handler functions
+type callbackHandler struct {
 	store Store
 }
 
-// NewCallbackHandler returns a pointer to a CallbackHandler that uses the provided Store.
-func NewCallbackHandler(store Store) *CallbackHandler {
-	return &CallbackHandler{store}
+// NewCallbackHandler returns a pointer to a callbackHandler that uses the provided Store.
+func NewCallbackHandler(store Store) http.Handler {
+	c := callbackHandler{store}
+
+	mux := mux.NewRouter()
+	mux.HandleFunc("/installed", c.handleInstalled)
+	mux.HandleFunc("/installed/{oAuthId}", c.handleRemoved)
+	mux.HandleFunc("/updated", c.handleUpdated)
+
+	return mux
 }
 
-func (c *CallbackHandler) handleInstalled(w http.ResponseWriter, r *http.Request) {
+func (c *callbackHandler) handleInstalled(w http.ResponseWriter, r *http.Request) {
 	// Note - this URL receives a DELETE request at /installed/oauth_id when the add-on is removed.
 
 	if r.Method == "POST" {
@@ -68,11 +75,11 @@ func (c *CallbackHandler) handleInstalled(w http.ResponseWriter, r *http.Request
 
 }
 
-func (c *CallbackHandler) handleUpdated(w http.ResponseWriter, r *http.Request) {
+func (c *callbackHandler) handleUpdated(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "TODO - handle %s callback", r.URL.Path)
 }
 
-func (c *CallbackHandler) handleRemoved(w http.ResponseWriter, r *http.Request) {
+func (c *callbackHandler) handleRemoved(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "DELETE" {
 		// TODO - validate request.
 		oAuthID := mux.Vars(r)["oAuthId"]
@@ -91,14 +98,4 @@ func (c *CallbackHandler) handleRemoved(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "Method %s not supported at %s", r.Method, r.URL.Path)
 	}
-}
-
-// CallbackHandler returns a HandlerMux with the callback endpoints configured.
-func (c *CallbackHandler) CallbackHandler() http.Handler {
-	mux := mux.NewRouter()
-	mux.HandleFunc("/installed", c.handleInstalled)
-	mux.HandleFunc("/installed/{oAuthId}", c.handleRemoved)
-	mux.HandleFunc("/updated", c.handleUpdated)
-
-	return mux
 }

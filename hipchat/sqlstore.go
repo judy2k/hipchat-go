@@ -9,9 +9,9 @@ type SqlStore struct {
 	db *sql.DB
 }
 
-// NewPostgresSqlStore creates a new data store
-func NewSqlStore(engine string, dbURL string) (Store, error) {
-	db, err := sql.Open(engine, dbURL)
+// NewSqlStore creates a new data store backed by a database.
+func NewSqlStore(driverName string, dataSourceName string) (Store, error) {
+	db, err := sql.Open(driverName, dataSourceName)
 	if err != nil {
 		return nil, err
 	}
