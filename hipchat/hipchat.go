@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/go-querystring/query"
 	"io"
 	"io/ioutil"
 	"mime"
@@ -19,6 +18,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/google/go-querystring/query"
 )
 
 const (
@@ -166,7 +167,7 @@ func (c *Client) NewFileUploadRequest(method, urlStr string, v interface{}) (*ht
 	}
 
 	// Check if file exists
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if _, err = os.Stat(path); os.IsNotExist(err) {
 		return nil, err
 	}
 

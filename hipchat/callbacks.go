@@ -19,24 +19,50 @@ type InstallRecord struct {
 	RoomID          uint64 `json:"roomId"`
 }
 
-// callbackHandler stores state shared by callback handler functions
-type callbackHandler struct {
-	store Store
+// Integration stores state shared by callback handler functions
+type Integration struct {
+	store                 Store
+	installationCallbacks []func()
+	updatedCallbacks      []func()
+	removedCallbacks      []func()
+	handler               http.Handler
 }
 
-// NewCallbackHandler returns a pointer to a callbackHandler that uses the provided Store.
-func NewCallbackHandler(store Store) http.Handler {
-	c := callbackHandler{store}
+// NewIntegration returns a pointer to a Integration that uses the provided Store.
+func NewIntegration(store Store) *Integration {
+	c := Integration{store: store}
 
 	mux := mux.NewRouter()
 	mux.HandleFunc("/installed", c.handleInstalled)
 	mux.HandleFunc("/installed/{oAuthId}", c.handleRemoved)
 	mux.HandleFunc("/updated", c.handleUpdated)
 
-	return mux
+	c.handler = mux
+
+	return &c
 }
 
-func (c *callbackHandler) handleInstalled(w http.ResponseWriter, r *http.Request) {
+// GetHandler obtains an http.Handler that should be attached to the http server
+func (c *Integration) GetHandler() http.Handler {
+	return c.handler
+}
+
+// AddInstallationCallback adds a callback that will be called when the integration is installed.
+func (c *Integration) AddInstallationCallback(callback func()) {
+	c.installationCallbacks = append(c.installationCallbacks, callback)
+}
+
+// AddUpdatedCallback adds a callback that will be called when an installation is updated.
+func (c *Integration) AddUpdatedCallback(callback func()) {
+	c.updatedCallbacks = append(c.updatedCallbacks, callback)
+}
+
+// AddRemovedCallback adds a callback that will be called when the integration is uninstalled.
+func (c *Integration) AddRemovedCallback(callback func()) {
+	c.removedCallbacks = append(c.removedCallbacks, callback)
+}
+
+func (c *Integration) handleInstalled(w http.ResponseWriter, r *http.Request) {
 	// Note - this URL receives a DELETE request at /installed/oauth_id when the add-on is removed.
 
 	if r.Method == "POST" {
@@ -67,6 +93,12 @@ func (c *callbackHandler) handleInstalled(w http.ResponseWriter, r *http.Request
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")
+
+		go c.CompleteInstallation(&i)
+
+		for _, callback := range c.installationCallbacks {
+			go callback()
+		}
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "Method %s not supported at %s", r.Method, r.URL.Path)
@@ -75,11 +107,56 @@ func (c *callbackHandler) handleInstalled(w http.ResponseWriter, r *http.Request
 
 }
 
-func (c *callbackHandler) handleUpdated(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "TODO - handle %s callback", r.URL.Path)
+func (c *Integration) CompleteInstallation(i *InstallRecord) {
+	log.Println("Completing installation")
+	client := NewClient("")
+	credentials := ClientCredentials{i.OAuthID, i.OAuthSecret}
+	// TODO: Hard-coded, but should be stored away when descriptor is generated.
+	token, _, err := client.GenerateToken(credentials, []string{})
+	if err != nil {
+		log.Printf("Error requesting token: %v", err)
+		return
+	}
+	log.Printf("Token obtained: %v", token)
 }
 
-func (c *callbackHandler) handleRemoved(w http.ResponseWriter, r *http.Request) {
+func (c *Integration) handleUpdated(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "TODO - handle %s callback", r.URL.Path)
+	for _, callback := range c.updatedCallbacks {
+		go callback()
+	}
+}
+
+type Capabilities struct {
+	OAuth2Provider Provider `json:"oauth2Provider"`
+}
+
+type Provider struct {
+	AuthorizationURL string `json:"authorizationUrl"`
+	TokenURL         string `json:"tokenUrl"`
+}
+
+func (c *Integration) getCapabilities(url string) (*Capabilities, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	capabilities := &Capabilities{}
+	err = json.Unmarshal(data, capabilities)
+	if err != nil {
+		return nil, err
+	}
+
+	return capabilities, nil
+}
+
+func (c *Integration) handleRemoved(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "DELETE" {
 		// TODO - validate request.
 		oAuthID := mux.Vars(r)["oAuthId"]
@@ -94,6 +171,9 @@ func (c *callbackHandler) handleRemoved(w http.ResponseWriter, r *http.Request) 
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")
+		for _, callback := range c.removedCallbacks {
+			go callback()
+		}
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "Method %s not supported at %s", r.Method, r.URL.Path)
