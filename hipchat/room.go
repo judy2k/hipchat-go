@@ -241,6 +241,18 @@ type InviteRequest struct {
 	Reason string `json:"reason"`
 }
 
+// GlanceRequest represents a hipchat glance request
+type GlanceRequest struct {
+	Key  string `json:"key"`
+	Icon Icon   `json:"icon"`
+	Name Name   `json:"name"`
+}
+
+type Name struct {
+	Value string `json:"value"`
+	I18N  string `json:"i18n,omitempty"`
+}
+
 // AddAttribute adds an attribute to a Card
 func (c *Card) AddAttribute(mainLabel, subLabel, url, iconURL string) {
 	attr := Attribute{Label: mainLabel}
@@ -457,6 +469,18 @@ func (r *RoomService) Invite(room string, user string, reason string) (*http.Res
 	reasonReq := &InviteRequest{Reason: reason}
 
 	req, err := r.client.NewRequest("POST", fmt.Sprintf("room/%s/invite/%s", room, user), nil, reasonReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.client.Do(req, nil)
+}
+
+// CreateGlance creates a glance in a room's sidebar
+//
+// HipChat API docs: https://www.hipchat.com/docs/apiv2/method/create_room_glance
+func (r *RoomService) CreateGlance(room string, glanceReq *GlanceRequest) (*http.Response, error) {
+	req, err := r.client.NewRequest("PUT", fmt.Sprintf("/v2/room/%s/extension/glance/%s", room, glanceReq.Key), nil, glanceReq)
 	if err != nil {
 		return nil, err
 	}
