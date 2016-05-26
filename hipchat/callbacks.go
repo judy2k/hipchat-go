@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/gorilla/mux"
+	gorillaMux "github.com/gorilla/mux"
 )
 
 // InstallRecord represents the structure sent to /installed for unmarshalling.
@@ -21,20 +21,28 @@ type InstallRecord struct {
 
 // Integration stores state shared by callback handler functions
 type Integration struct {
-	store                 Store
+	Store                 Store
 	installationCallbacks []func()
 	updatedCallbacks      []func()
 	removedCallbacks      []func()
 	handler               http.Handler
+	Tokens                map[uint32]string
 }
 
 // NewIntegration returns a pointer to a Integration that uses the provided Store.
 func NewIntegration(store Store) *Integration {
-	c := Integration{store: store}
+	c := Integration{
+		Store: store,
+		installationCallbacks: make([]func(), 0),
+		updatedCallbacks:      make([]func(), 0),
+		removedCallbacks:      make([]func(), 0),
+		Tokens:                make(map[uint32]string),
+	}
 
-	mux := mux.NewRouter()
-	mux.HandleFunc("/installed", c.handleInstalled)
-	mux.HandleFunc("/installed/{oAuthId}", c.handleRemoved)
+	mux := gorillaMux.NewRouter()
+	mux.Path("/installed").Methods("POST").HandlerFunc(c.handleInstalled)
+	//mux.HandleFunc("/installed", c.handleInstalled)
+	mux.Path("/installed/{oAuthId}").Methods("DELETE").HandlerFunc(c.handleRemoved)
 	mux.HandleFunc("/updated", c.handleUpdated)
 
 	c.handler = mux
@@ -83,9 +91,9 @@ func (c *Integration) handleInstalled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err = c.store.SaveCredentials(&i)
+		err = c.Store.SaveCredentials(&i)
 		if err != nil {
-			log.Printf("Error saving credentials to store: %v", err)
+			log.Printf("Error saving credentials to Store: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintln(w, "There was an error saving these credentials")
 			return
@@ -95,10 +103,6 @@ func (c *Integration) handleInstalled(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "OK")
 
 		go c.CompleteInstallation(&i)
-
-		for _, callback := range c.installationCallbacks {
-			go callback()
-		}
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "Method %s not supported at %s", r.Method, r.URL.Path)
@@ -118,6 +122,11 @@ func (c *Integration) CompleteInstallation(i *InstallRecord) {
 		return
 	}
 	log.Printf("Token obtained: %v", token)
+	c.Tokens[token.GroupID] = token.AccessToken
+
+	for _, callback := range c.installationCallbacks {
+		go callback()
+	}
 }
 
 func (c *Integration) handleUpdated(w http.ResponseWriter, r *http.Request) {
@@ -159,9 +168,9 @@ func (c *Integration) getCapabilities(url string) (*Capabilities, error) {
 func (c *Integration) handleRemoved(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "DELETE" {
 		// TODO - validate request.
-		oAuthID := mux.Vars(r)["oAuthId"]
+		oAuthID := gorillaMux.Vars(r)["oAuthId"]
 
-		err := c.store.DeleteCredentials(oAuthID)
+		err := c.Store.DeleteCredentials(oAuthID)
 		if err != nil {
 			log.Printf("Error deleting credentials credentials for %v: %v", oAuthID, err)
 			w.WriteHeader(http.StatusInternalServerError)

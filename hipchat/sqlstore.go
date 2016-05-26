@@ -18,6 +18,21 @@ func NewSqlStore(driverName string, dataSourceName string) (Store, error) {
 	return &SqlStore{db}, nil
 }
 
+func (s *SqlStore) GetGroupID(roomID uint32) (uint32, error) {
+	var result uint32
+	err := s.db.QueryRow(
+		"SELECT groupid from installation where roomid = $1", roomID).Scan(
+		&result)
+	switch {
+	case err == sql.ErrNoRows:
+		return 0, nil
+	case err != nil:
+		return 0, err
+	default:
+		return result, nil
+	}
+}
+
 // SaveCredentials saves a group's credentials to the SqlStore
 func (s *SqlStore) SaveCredentials(i *InstallRecord) error {
 	_, err := s.db.Exec(

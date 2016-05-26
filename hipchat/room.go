@@ -487,3 +487,70 @@ func (r *RoomService) CreateGlance(room string, glanceReq *GlanceRequest) (*http
 
 	return r.client.Do(req, nil)
 }
+
+type RoomAddOnUIUpdateReq struct {
+	Glances []GlanceUpdate `json:"glance"`
+}
+
+type GlanceUpdate struct {
+	Content GlanceUpdateContent `json:"content"`
+	Key     string              `json:"key"`
+}
+
+type GlanceUpdateContent struct {
+	Status *interface{} `json:"status,omitempty"`
+	Label  GlanceLabel  `json:"label"`
+}
+
+type GlanceStatusLozenge struct {
+	Type  string       `json:"type"`
+	Value LozengeValue `json:"value"`
+}
+
+const (
+	LozengeTypeDefault  = "default"
+	LozengeTypeSuccess  = "success"
+	LozengeTypeError    = "error"
+	LozengeTypeCurrent  = "current"
+	LozengeTypeNew      = "new"
+	LozengeTypeComplete = "complete"
+	LozengeTypeMoved    = "moved"
+)
+
+type LozengeValue struct {
+	Type  string `json:"type"`
+	Label string `json:"label"`
+}
+
+type GlanceStatusIcon struct {
+	Type  string `json:"type"`
+	Value Icon   `json:"value"`
+}
+
+type GlanceLabel struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+func NewGlanceUpdate(key, label string) GlanceUpdate {
+	result := GlanceUpdate{
+		Key: key,
+		Content: GlanceUpdateContent{
+			Label: GlanceLabel{
+				Type:  "html",
+				Value: label,
+			},
+		},
+	}
+
+	return result
+}
+
+func (r *RoomService) RoomAddOnUIUpdate(room string, addOnUIUpdateReq *RoomAddOnUIUpdateReq) (*http.Response, error) {
+	req, err := r.client.NewRequest("POST", fmt.Sprintf("/v2/addon/ui/room/%s", room), nil, addOnUIUpdateReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.client.Do(req, nil)
+}
