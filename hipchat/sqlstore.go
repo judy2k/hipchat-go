@@ -2,6 +2,7 @@ package hipchat
 
 import (
 	"database/sql"
+	"log"
 )
 
 // SqlStore encapsulates a data store
@@ -20,9 +21,11 @@ func NewSqlStore(driverName string, dataSourceName string) (Store, error) {
 
 func (s *SqlStore) GetGroupID(roomID uint32) (uint32, error) {
 	var result uint32
+	log.Printf("Looking up group-id for room-id: %v", roomID)
 	err := s.db.QueryRow(
 		"SELECT groupid from installation where roomid = $1", roomID).Scan(
 		&result)
+	log.Printf("Result: %v", result)
 	switch {
 	case err == sql.ErrNoRows:
 		return 0, nil
@@ -52,10 +55,10 @@ func (s *SqlStore) DeleteCredentials(oAuthID string) error {
 }
 
 // GetCredentials obtains a group's credentials from the SqlStore
-func (s *SqlStore) GetCredentials(groupID uint64) (*InstallRecord, error) {
+func (s *SqlStore) GetCredentials(groupID, roomID uint32) (*InstallRecord, error) {
 	c := &InstallRecord{}
 	err := s.db.QueryRow(
-		"SELECT capabilitiesUrl, oauthId, oauthSecret, groupId, roomId FROM installation WHERE groupId = $1", groupID).Scan(
+		"SELECT capabilitiesUrl, oauthId, oauthSecret, groupId, roomId FROM installation WHERE groupId = $1 AND roomId = $2", groupID, roomID).Scan(
 		&c.CapabilitiesURL, &c.OAuthID, &c.OAuthSecret, &c.GroupID, &c.RoomID)
 	switch {
 	case err == sql.ErrNoRows:

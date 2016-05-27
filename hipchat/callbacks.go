@@ -26,7 +26,7 @@ type Integration struct {
 	updatedCallbacks      []func()
 	removedCallbacks      []func()
 	handler               http.Handler
-	Tokens                map[uint32]string
+	tokens                map[string]string // Key is "groupid:roomid"
 }
 
 // NewIntegration returns a pointer to a Integration that uses the provided Store.
@@ -36,7 +36,7 @@ func NewIntegration(store Store) *Integration {
 		installationCallbacks: make([]func(), 0),
 		updatedCallbacks:      make([]func(), 0),
 		removedCallbacks:      make([]func(), 0),
-		Tokens:                make(map[uint32]string),
+		tokens:                make(map[string]string),
 	}
 
 	mux := gorillaMux.NewRouter()
@@ -51,23 +51,23 @@ func NewIntegration(store Store) *Integration {
 }
 
 // GetHandler obtains an http.Handler that should be attached to the http server
-func (c *Integration) GetHandler() http.Handler {
-	return c.handler
+func (i *Integration) GetHandler() http.Handler {
+	return i.handler
 }
 
 // AddInstallationCallback adds a callback that will be called when the integration is installed.
-func (c *Integration) AddInstallationCallback(callback func()) {
-	c.installationCallbacks = append(c.installationCallbacks, callback)
+func (i *Integration) AddInstallationCallback(callback func()) {
+	i.installationCallbacks = append(i.installationCallbacks, callback)
 }
 
 // AddUpdatedCallback adds a callback that will be called when an installation is updated.
-func (c *Integration) AddUpdatedCallback(callback func()) {
-	c.updatedCallbacks = append(c.updatedCallbacks, callback)
+func (i *Integration) AddUpdatedCallback(callback func()) {
+	i.updatedCallbacks = append(i.updatedCallbacks, callback)
 }
 
 // AddRemovedCallback adds a callback that will be called when the integration is uninstalled.
-func (c *Integration) AddRemovedCallback(callback func()) {
-	c.removedCallbacks = append(c.removedCallbacks, callback)
+func (i *Integration) AddRemovedCallback(callback func()) {
+	i.removedCallbacks = append(i.removedCallbacks, callback)
 }
 
 func (c *Integration) handleInstalled(w http.ResponseWriter, r *http.Request) {
@@ -111,22 +111,34 @@ func (c *Integration) handleInstalled(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (c *Integration) CompleteInstallation(i *InstallRecord) {
+func (i *Integration) CompleteInstallation(record *InstallRecord) {
 	log.Println("Completing installation")
-	client := NewClient("")
-	credentials := ClientCredentials{i.OAuthID, i.OAuthSecret}
-	// TODO: Hard-coded, but should be stored away when descriptor is generated.
-	token, _, err := client.GenerateToken(credentials, []string{})
+
+	_, err := i.getToken(record)
 	if err != nil {
 		log.Printf("Error requesting token: %v", err)
 		return
 	}
-	log.Printf("Token obtained: %v", token)
-	c.Tokens[token.GroupID] = token.AccessToken
 
-	for _, callback := range c.installationCallbacks {
+	for _, callback := range i.installationCallbacks {
 		go callback()
 	}
+}
+
+// getToken requests a token from HipChat and then caches the result
+func (i *Integration) getToken(credentials *InstallRecord) (string, error) {
+	client := NewClient("")
+	// TODO: Hard-coded, but should be stored away when descriptor is generated.
+	token, _, err := client.GenerateToken(ClientCredentials{credentials.OAuthID, credentials.OAuthSecret}, []string{})
+	if err != nil {
+		return "", err
+	}
+	log.Printf("Token obtained: %v", token)
+	
+	key := fmt.Sprintf("%v:%v", credentials.GroupID, credentials.RoomID)
+	i.tokens[key] = token.AccessToken
+
+	return token.AccessToken, nil
 }
 
 func (c *Integration) handleUpdated(w http.ResponseWriter, r *http.Request) {
@@ -187,4 +199,23 @@ func (c *Integration) handleRemoved(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		fmt.Fprintf(w, "Method %s not supported at %s", r.Method, r.URL.Path)
 	}
+}
+
+func (i *Integration) GetTokenForRoom(roomID uint32) (string, error) {
+	groupID, err := i.Store.GetGroupID(roomID)
+	if err != nil {
+		return "", nil
+	}
+	
+	key := fmt.Sprintf("%v:%v", groupID, roomID)
+	
+	token, exists := i.tokens[key]
+	if !exists {
+		credentials, err := i.Store.GetCredentials(groupID, roomID)
+		if err != nil {
+			return "", err
+		}
+		return i.getToken(credentials)
+	}
+	return token, nil
 }
