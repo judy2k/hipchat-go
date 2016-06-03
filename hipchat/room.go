@@ -498,7 +498,7 @@ type GlanceUpdate struct {
 }
 
 type GlanceUpdateContent struct {
-	Status *interface{} `json:"status,omitempty"`
+	Status interface{} `json:"status,omitempty"`
 	Label  GlanceLabel  `json:"label"`
 }
 
@@ -544,6 +544,31 @@ func NewGlanceUpdate(key, label string) GlanceUpdate {
 	}
 
 	return result
+}
+
+func NewGlanceUpdateContent(label string) GlanceUpdateContent {
+	result := GlanceUpdateContent{
+		Label: GlanceLabel{
+			Type:  "html",
+			Value: label,
+		},
+	}
+
+	return result
+}
+
+func (gu *GlanceUpdate) SetLozenge(lozengeType, lozengeLabel string) {
+	gu.Content.SetLozenge(lozengeType, lozengeLabel)
+}
+
+func (c *GlanceUpdateContent) SetLozenge(lozengeType, lozengeLabel string) {
+	c.Status = &GlanceStatusLozenge{
+		Type: "lozenge",
+		Value: LozengeValue{
+			Type: lozengeType,
+			Label: lozengeLabel,
+		},
+	}
 }
 
 func (r *RoomService) RoomAddOnUIUpdate(room string, addOnUIUpdateReq *RoomAddOnUIUpdateReq) (*http.Response, error) {

@@ -69,3 +69,18 @@ func (s *SqlStore) GetCredentials(groupID, roomID uint32) (*InstallRecord, error
 		return c, nil
 	}
 }
+
+func (s *SqlStore) GetOAuthSecret(oauthID string) (string, error) {
+	var result string
+	
+	err := s.db.QueryRow(
+		"SELECT oauthSecret FROM installation WHERE oauthId = $1", oauthID).Scan(&result)
+	switch {
+	case err == sql.ErrNoRows:
+		return "", nil
+	case err != nil:
+		return "", err
+	default:
+		return result, nil
+	}
+}

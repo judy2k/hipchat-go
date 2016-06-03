@@ -6,8 +6,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strings"
 
 	gorillaMux "github.com/gorilla/mux"
+	"github.com/dgrijalva/jwt-go"
 )
 
 // InstallRecord represents the structure sent to /installed for unmarshalling.
@@ -202,6 +204,7 @@ func (c *Integration) handleRemoved(w http.ResponseWriter, r *http.Request) {
 }
 
 func (i *Integration) GetTokenForRoom(roomID uint32) (string, error) {
+	// TODO: Handle token expiry
 	groupID, err := i.Store.GetGroupID(roomID)
 	if err != nil {
 		return "", nil
@@ -218,4 +221,98 @@ func (i *Integration) GetTokenForRoom(roomID uint32) (string, error) {
 		return i.getToken(credentials)
 	}
 	return token, nil
+}
+
+type SignedParams struct {
+	RoomID uint32
+	UserTimezone string
+}
+
+func (sp SignedParams) String() string {
+	return fmt.Sprintf("SignedParams<RoomID: %v, Timezone: \"%v\">", sp.RoomID, sp.UserTimezone)
+} 
+
+func NewSignedParams(token *jwt.Token) (*SignedParams, error) {
+	result := &SignedParams{}
+	
+	switch context := token.Claims["context"].(type) {
+	case map[string]interface{}:
+		if err := extractType(context, "room_id", &result.RoomID); err != nil {
+			return nil, fmt.Errorf("Error extracting room_id: %v", err)
+		}
+		if err := extractType(context, "user_tz", &result.UserTimezone); err != nil {
+			return nil, fmt.Errorf("Error extracting user_tz: %v", err)
+		}
+	default:
+		return nil, fmt.Errorf("context of wrong type: %t", context)
+	}
+	
+	return result, nil
+}
+
+func extractType(dict map[string]interface{}, key string, dest interface{}) error {
+	if dict[key] == nil {
+		return fmt.Errorf("Missing signed parameter \"%v\"", key)
+	}
+	switch d := dest.(type) {
+	case *string:
+		switch v := dict[key].(type) {
+		case string:
+			*d = v
+			return nil
+		}
+	case *uint32:
+		switch v := dict[key].(type) {
+		case float32, float64:
+			*d = uint32(v.(float64))
+			return nil
+		}
+	}
+	return fmt.Errorf("Type mismatch for signed param %v dest: %t, source: %t", key, dest, dict[key])
+}
+
+// ParseTokenFromRequest extracts and validates a JWT token from the request.
+func (i *Integration) ParseSignedParams(req *http.Request) (*SignedParams, error) {
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+		
+		// Look up oauth secret with the iss string
+		switch oauthID := token.Claims["iss"].(type) {
+		case string:
+			secret, err := i.Store.GetOAuthSecret(oauthID)
+			if err != nil {
+				return nil, err
+			}
+			
+        return []byte(secret), nil
+		default:
+			return nil, fmt.Errorf("iss header of wrong type: %t", oauthID)
+		}
+	}
+	
+	// Look for an Authorization header
+	if ah := req.Header.Get("Authorization"); ah != "" {
+		prefix := "JWT "
+		if strings.HasPrefix(strings.ToUpper(ah), prefix) {
+			return parse(ah[len(prefix):], keyFunc)
+		}
+	}
+
+	// Look for "signed_request" parameter
+	req.ParseMultipartForm(10e6)
+	if tokStr := req.Form.Get("signed_request"); tokStr != "" {
+		return parse(tokStr, keyFunc)
+	}
+
+	return nil, jwt.ErrNoTokenInRequest
+}
+
+func parse(tokenStr string, keyFunc func(token *jwt.Token) (interface{}, error)) (*SignedParams, error) {
+	token, err := jwt.Parse(tokenStr, keyFunc)
+	if err != nil {
+		return nil, err
+	}
+	return NewSignedParams(token)
 }
